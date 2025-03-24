@@ -37,7 +37,7 @@ accelerate launch --multi_gpu --mixed_precision bf16 --num_machines 1 --num_proc
     --project_name=${PROJ_NAME} \
     --exp_name=${EXP_NAME} \
     --zero_snr \
-    --num_ts 4 \
+    --num_ts 1 \
     --ckpt_folder='/export/data/sheid/LADD_results/checkpoints/training_2' \
     --multiscale_D \
     --misaligned_pairs_D \

@@ -42,7 +42,9 @@ class ADDDataset(Dataset):
 
     def _load_flist(self):
         print('loading file info...')
+        print(os.path.join(self.data_root, self.pkl_name))
         with open(os.path.join(self.data_root, self.pkl_name), 'rb') as f:
+            print("HEYHEYHEY")
             self.flist = pickle.load(f)
 
         print('file info loaded. %d images in total' % len(self.flist))

@@ -13,11 +13,13 @@
 # limitations under the License.
 
 import os
+from tqdm import tqdm 
 import random
 import datetime
 import torch
 from diffusers import DiffusionPipeline, DDIMScheduler, PixArtSigmaPipeline, PixArtTransformer2DModel
 import argparse
+from pathlib import Path
 
 parser = argparse.ArgumentParser(description='args for generating synthetic data')
 
@@ -95,6 +97,23 @@ parser.add_argument(
     )
 
 parser.add_argument(
+        '--laion',
+        type=bool,
+        default=True,
+        help=(
+            'if LAION dataset is generated'
+        ))
+        
+parser.add_argument(
+        '--laion_path',
+        type=str,
+        default="/export/data/vislearn/rother_subgroup/dzavadsk/datasets/laion/subset_250/" ,
+        help=(
+            'Path where LAION dataset is stored'
+        ))
+
+
+parser.add_argument(
         '--output_type',
         type=str,
         default='latent',
@@ -122,13 +141,18 @@ os.makedirs(latent_folder, exist_ok=True)
 os.makedirs(txt_emb_folder, exist_ok=True)
 os.makedirs(noise_folder, exist_ok=True)
 
-with open(args.prompt_path, 'r') as f:
-    lines = f.readlines()
-
 anno_list = []
-for ind, cur_l in enumerate(lines):
-    anno_list.append((str(ind), cur_l))
-
+if args.laion:
+    data_list = sorted([f.stem for f in Path(args.laion_path + "images").glob("*.webp")])
+    for ind, data_name in tqdm(enumerate(data_list)):
+        with open(args.laion_path + "metadata/" + data_name + ".txt", "r", encoding="utf-8") as file:
+            prompt = file.read()
+            anno_list.append((str(ind), prompt))
+else:
+    with open(args.prompt_path, 'r') as f:
+        lines = f.readlines()
+    for ind, cur_l in enumerate(lines):
+        anno_list.append((str(ind), cur_l))
 
 random.seed(datetime.datetime.now().timestamp() * 10000)
 random.shuffle(anno_list)
@@ -227,7 +251,9 @@ else:
 pipe.to('cuda')
 
 num_samples = len(anno_list)
-for i in range(len(anno_list)):
+
+for i in range(500000,600000,1):
+    print(i)
     prompt = anno_list[i][1]
     basename = anno_list[i][0]+'.png'
 

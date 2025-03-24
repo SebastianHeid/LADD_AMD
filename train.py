@@ -277,6 +277,15 @@ def parse_args():
             'The integration to report the results and logs to. Supported platforms are \'tensorboard\''
             ' (default), \'wandb\' and \'comet_ml\'. Use \'all\' to report to all integrations.'
         ),
+    )   
+    
+    parser.add_argument(
+        '--project_dir',
+        type=str,
+        default='training',
+        help=(
+            'The `project_name` argument passed to Accelerator.init_trackers for'
+        ),
     )
 
     parser.add_argument('--exp_name', type=str, default='default_exp_name', help='identify exp name')
@@ -338,7 +347,6 @@ def parse_args():
 
 
 def main(args):
-
     if args.use_fsdp:
         from accelerate import FullyShardedDataParallelPlugin
         from torch.distributed.fsdp.fully_sharded_data_parallel import FullStateDictConfig, FullOptimStateDictConfig
@@ -355,6 +363,7 @@ def main(args):
         log_with=args.report_to,
         split_batches=True,
         fsdp_plugin=fsdp_plugin,
+        project_dir=args.project_dir
     )
 
     if accelerator.is_main_process:
@@ -431,6 +440,7 @@ def main(args):
     alpha_schedule = alpha_schedule.to(accelerator.device)
     sigma_schedule = sigma_schedule.to(accelerator.device)
 
+   
     # 12. Enable optimizations
     if args.enable_xformers_memory_efficient_attention:
         if is_xformers_available():
@@ -464,8 +474,10 @@ def main(args):
         **opt_kwargs
     )
 
-    train_dataset = ADDDataset(args.dataset_root,
-                            args.data_pkl_name)
+    dataset_root = "/export/data/vislearn/rother_subgroup/sheid/LAION_LADD/"
+    data_pkl_name = "summary.pkl"
+    train_dataset = ADDDataset(dataset_root,
+                            data_pkl_name)
     train_dataloader = torch.utils.data.DataLoader(
         train_dataset,
         shuffle=True,
@@ -584,6 +596,7 @@ def main(args):
                     
                     # adv loss
                     pred_fake = disc(noised_predicted_x0, timesteps_D, added_cond_kwargs=added_cond_kwargs, **text_embs)
+        
                     adv_loss = F.binary_cross_entropy_with_logits(pred_fake, torch.ones_like(pred_fake))
 
                     #recon loss
