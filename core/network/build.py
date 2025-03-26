@@ -14,11 +14,11 @@
 
 import os
 
-def build_disc(basemodel, multiscale_D=False):
+def build_disc(basemodel,config,  multiscale_D=False):
     if basemodel in ['stabilityai/stable-diffusion-2-1-base',
                     'stabilityai/stable-diffusion-xl-base-1.0']:
         from .unet_D import Discriminator
-        return Discriminator(basemodel, multiscale_D)
+        return Discriminator(basemodel, config, multiscale_D)
     
     elif basemodel in ['PixArt-alpha/PixArt-Sigma-XL-2-1024-MS']:
         from .transformer_D import Transformer2DDiscriminator

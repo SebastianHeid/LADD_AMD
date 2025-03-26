@@ -15,12 +15,13 @@
 # options: 'stabilityai/stable-diffusion-2-1-base', 'PixArt-alpha/PixArt-Sigma-XL-2-1024-MS'
 export MODEL_NAME='stabilityai/stable-diffusion-2-1-base'
 export PROJ_NAME='add_v21_base'
-export EXP_NAME='training3'
+export EXP_NAME='training4'
 export DATA_ROOT='/export/data/vislearn/rother_subgroup/sheid/LAION_LADD/'
+export WANDB_DIR='/export/data/sheid/LADD_results/wandb/training_4'
 
 
-accelerate launch --mixed_precision bf16 --num_machines 1 --num_processes 1 --gpu_ids 6  train.py \
-    --config_path='/export/home/sheid/LADD_AMD/config/config_traini.yaml' \
+accelerate launch --mixed_precision bf16 --num_machines 1 --num_processes 1 --gpu_ids 0 train.py \
+    --config_path='/export/home/sheid/LADD_AMD/config/config_training_4.yaml' \
     --base_model=$MODEL_NAME \
     --mixed_precision=bf16 \
     --G_lr=1e-6 \
@@ -31,7 +32,7 @@ accelerate launch --mixed_precision bf16 --num_machines 1 --num_processes 1 --gp
     --data_pkl_name='summary.pkl' \
     --validation_steps=500 \
     --checkpointing_steps=250 \
-    --train_batch_size=3 \
+    --train_batch_size=128 \
     --gradient_checkpointing \
     --gradient_accumulation_steps=1 \
     --seed=1 \
@@ -39,10 +40,10 @@ accelerate launch --mixed_precision bf16 --num_machines 1 --num_processes 1 --gp
     --exp_name=${EXP_NAME} \
     --zero_snr \
     --num_ts 4 \
-    --ckpt_folder='/export/data/sheid/LADD_results/checkpoints/training_3' \
+    --ckpt_folder='/export/data/sheid/LADD_results/checkpoints/training_4' \
     --multiscale_D \
     --misaligned_pairs_D \
     --report_to=wandb \
-    --project_dir='training3' \
+    --project_dir='/export/home/sheid/LADD_AMD/logging' \
 
 

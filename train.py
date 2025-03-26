@@ -18,7 +18,10 @@ import os
 from tqdm import tqdm
 from core.network.build import (build_disc, 
                                 build_target_model,
-                                build_pipeline)    
+                                build_pipeline)  
+
+import yaml
+from box import Box  
 import numpy as np
 import torch
 import torch.nn.functional as F
@@ -111,6 +114,13 @@ def log_validation(model_state_dict, accelerator, scheduler, timestep_list, args
 def parse_args():
     parser = argparse.ArgumentParser(description='Training LADD')
     # ----------MODEL INFO----------
+    parser.add_argument(
+        '--config_path',
+        type=str,
+        default='/export/home/sheid/LADD_AMD/config/config_traini.yaml',
+        help='Path to config file.',
+    )
+    
     parser.add_argument(
         '--base_model',
         type=str,
@@ -346,7 +356,7 @@ def parse_args():
     return args
 
 
-def main(args):
+def main(args, config):
     if args.use_fsdp:
         from accelerate import FullyShardedDataParallelPlugin
         from torch.distributed.fsdp.fully_sharded_data_parallel import FullStateDictConfig, FullOptimStateDictConfig
@@ -427,7 +437,7 @@ def main(args):
     alpha_schedule = torch.sqrt(noise_scheduler.alphas_cumprod)
     sigma_schedule = torch.sqrt(1 - noise_scheduler.alphas_cumprod)
 
-    disc = build_disc(args.base_model, args.multiscale_D)
+    disc = build_disc(args.base_model, config, args.multiscale_D)
     target_model = build_target_model(args.base_model)
 
     disc.train()
@@ -439,6 +449,7 @@ def main(args):
     # Also move the alpha and sigma noise schedules to accelerator.device.
     alpha_schedule = alpha_schedule.to(accelerator.device)
     sigma_schedule = sigma_schedule.to(accelerator.device)
+ 
 
    
     # 12. Enable optimizations
@@ -548,6 +559,7 @@ def main(args):
     while True: #terminate training according to iters
         for step, batch in enumerate(train_dataloader):
             latents, noises, text_embs = batch
+            
             latents = latents.to(accelerator.device, non_blocking=True)
             noises = noises.to(accelerator.device, non_blocking=True)
             change_device(text_embs, accelerator.device)
@@ -555,7 +567,14 @@ def main(args):
             bsz = latents.shape[0]
             added_cond_kwargs = {"resolution": None, "aspect_ratio": None}
 
-            ts_indices = torch.randint(0, args.num_ts, (bsz, ))
+            if config.generator.warm_up and args.num_ts==4:
+                if step < config.generator.warm_up_steps:
+                    ts_indices = torch.multinomial(torch.tensor(config.generator.warm_up_prob), num_samples=bsz, replacement=True)
+                   
+                else:
+                    ts_indices = torch.multinomial(torch.tensor(config.generator.noise_prob), num_samples=bsz, replacement=True)
+            else:
+                ts_indices = torch.randint(0, args.num_ts, (bsz, ))
             timesteps = timestep_list[ts_indices].long()
 
             if args.num_ts == 1 and "PixArt" in args.base_model:  # Refer Appendix A.1 of https://arxiv.org/pdf/2403.04692
@@ -564,13 +583,12 @@ def main(args):
             else:
                 noisy_model_input = noise_scheduler.add_noise(latents, noises, timesteps)
             
-            
+           
             if phase == 'G':
                 with accelerator.accumulate(target_model):
 
                     disc.eval()
                     target_model.train()
-                    
                     noise_pred = target_model(
                         noisy_model_input,
                         timestep=timesteps,
@@ -656,7 +674,7 @@ def main(args):
                             alpha_schedule,
                             sigma_schedule,
                         )
-
+                  
                     timesteps_D_fake = ts_D_choices[torch.randint(0, len(ts_D_choices), (bsz, ), device=accelerator.device)]
                     timesteps_D_real = ts_D_choices[torch.randint(0, len(ts_D_choices), (bsz, ), device=accelerator.device)]
                     noised_predicted_x0 = noise_scheduler.add_noise(pred_x_0, torch.randn_like(latents), timesteps_D_fake)
@@ -751,4 +769,6 @@ def main(args):
 
 if __name__ == '__main__':
     args = parse_args()
-    main(args)
+    with open(args.config_path, "r") as file:
+        config = Box(yaml.safe_load(file))
+    main(args, config)

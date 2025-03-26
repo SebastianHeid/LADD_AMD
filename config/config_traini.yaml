@@ -1,0 +1,11 @@
+generator:
+  warm_up: True
+  warm_up_steps: 500
+  warm_up_prob: [0, 0, 0.5, 0.5]
+  noise_prob: [0.7, 0.1, 0.1, 0.1]
+
+discriminator:
+  noise_conditioning: True
+  clip_conditioning: True
+  clip_embedding_dim: 320
+  noise_embedding_dim: 320

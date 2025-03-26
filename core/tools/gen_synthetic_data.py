@@ -252,7 +252,7 @@ pipe.to('cuda')
 
 num_samples = len(anno_list)
 
-for i in range(500000,600000,1):
+for i in range(100000,120000,1):
     print(i)
     prompt = anno_list[i][1]
     basename = anno_list[i][0]+'.png'

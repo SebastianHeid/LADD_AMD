@@ -11,12 +11,11 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
-PROMPT_PATH='data/sample_prompts.txt'
-OUT_FOLDER='generated_data_sdxl'
+PROMPT_PATH='/export/home/sheid/AMD-Diffusion-Distillation/data/sample_prompts.txt'
+OUT_FOLDER='/export/data/vislearn/rother_subgroup/sheid/LAION_LADD_SDXL'
 MODEL_ID='stabilityai/stable-diffusion-xl-base-1.0'
 
-available_gpus=(0 1 2 3 4 5 6 7)
+available_gpus=(9)
 for gpu in "${available_gpus[@]}"; do
 CUDA_VISIBLE_DEVICES=${gpu} python core/tools/gen_synthetic_data.py \
                                 --prompt_path $PROMPT_PATH \

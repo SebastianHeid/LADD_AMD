@@ -17,10 +17,11 @@ export MODEL_NAME='stabilityai/stable-diffusion-2-1-base'
 export PROJ_NAME='add_v21_base'
 export EXP_NAME='training3'
 export DATA_ROOT='/export/data/vislearn/rother_subgroup/sheid/LAION_LADD/'
+export WANDB_DIR='/export/data/sheid/LADD_results/checkpoints/training_3'
 
 
-accelerate launch --mixed_precision bf16 --num_machines 1 --num_processes 1 --gpu_ids 6  train.py \
-    --config_path='/export/home/sheid/LADD_AMD/config/config_traini.yaml' \
+accelerate launch  --multi_gpu --mixed_precision bf16 --num_machines 1 --num_processes 2 --gpu_ids 6,7  train.py \
+    --config_path='/export/home/sheid/LADD_AMD/config/config_training_3.yaml' \
     --base_model=$MODEL_NAME \
     --mixed_precision=bf16 \
     --G_lr=1e-6 \
@@ -31,7 +32,7 @@ accelerate launch --mixed_precision bf16 --num_machines 1 --num_processes 1 --gp
     --data_pkl_name='summary.pkl' \
     --validation_steps=500 \
     --checkpointing_steps=250 \
-    --train_batch_size=3 \
+    --train_batch_size=64 \
     --gradient_checkpointing \
     --gradient_accumulation_steps=1 \
     --seed=1 \

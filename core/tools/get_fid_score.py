@@ -26,6 +26,7 @@ from pycocotools.coco import COCO
 parser = argparse.ArgumentParser()
 parser.add_argument(
         "--cocoroot",
+        default="/export/data/vislearn/rother_subgroup/dzavadsk/datasets/coco2017/",
         type=str,
         required=True,
     )
@@ -42,7 +43,7 @@ parser.add_argument(
     )
 opt = parser.parse_args()
 
-cocoann_path = os.path.join(opt.cocoroot, 'annotations/captions_val2017.json')
+cocoann_path = os.path.join(opt.cocoroot, '/coco2017_image_captions_val.json')
 coco = COCO(cocoann_path)
 
 with open(opt.inputfile, 'r') as f:
