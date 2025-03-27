@@ -12,18 +12,21 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import torch
 import os
 import re
 import shutil
+
+import torch
 from accelerate.logging import get_logger
 
 logger = get_logger(__name__)
+
 
 def extract_into_tensor(a, t, x_shape):
     b, *_ = t.shape
     out = a.gather(-1, t)
     return out.reshape(b, *((1,) * (len(x_shape) - 1)))
+
 
 def predicted_origin(model_output, timesteps, sample, prediction_type, alphas, sigmas):
     if prediction_type == "epsilon":
@@ -39,6 +42,7 @@ def predicted_origin(model_output, timesteps, sample, prediction_type, alphas, s
 
     return pred_x_0
 
+
 def change_device(src_dict, device):
     """
     input, a dict of tensors, or dict, change the device recursively.
@@ -53,7 +57,7 @@ def change_device(src_dict, device):
 
 def concat_dict(src_dict):
     """
-        concat a dict of tensors, or dict by dim=0 recursively
+    concat a dict of tensors, or dict by dim=0 recursively
     """
     assert isinstance(src_dict, dict)
     res_dict = {}
@@ -67,7 +71,8 @@ def concat_dict(src_dict):
 
 def keep_max_checkpoints(ckpt_dir, max_checkpoints_to_keep):
     folders = [os.path.join(ckpt_dir, folder) for folder in os.listdir(ckpt_dir)]
-    if (len(folders) > max_checkpoints_to_keep):
+    if len(folders) > max_checkpoints_to_keep:
+
         def _inner(folder):
             return list(map(int, re.findall(r"[\/]?([0-9]+)(?=[^\/]*$)", folder)))[0]
 
@@ -76,6 +81,4 @@ def keep_max_checkpoints(ckpt_dir, max_checkpoints_to_keep):
             f"Deleting {len(folders) - max_checkpoints_to_keep} checkpoints to make room for new checkpoint."
         )
         for folder in folders[: len(folders) - max_checkpoints_to_keep]:
-            shutil.rmtree(folder)  
-    
-
+            shutil.rmtree(folder)

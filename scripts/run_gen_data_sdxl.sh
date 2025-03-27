@@ -15,14 +15,14 @@ PROMPT_PATH='/export/home/sheid/AMD-Diffusion-Distillation/data/sample_prompts.t
 OUT_FOLDER='/export/data/vislearn/rother_subgroup/sheid/LAION_LADD_SDXL'
 MODEL_ID='stabilityai/stable-diffusion-xl-base-1.0'
 
-available_gpus=(9)
+available_gpus=(4)
 for gpu in "${available_gpus[@]}"; do
 CUDA_VISIBLE_DEVICES=${gpu} python core/tools/gen_synthetic_data.py \
                                 --prompt_path $PROMPT_PATH \
                                 --root_folder $OUT_FOLDER \
                                 --cfg 7.5 \
                                 --noise_size 128 \
-                                --num_inference_steps 30 \
+                                --num_inference_steps 50 \
                                 --base_model $MODEL_ID &
 done
 

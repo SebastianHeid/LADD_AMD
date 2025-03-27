@@ -15,18 +15,18 @@
 import torch
 import transformers
 
-def build_opt(opt_type, opt_params={}):
-    if opt_type in ['adamw', 'adam']:
-        opt_class = torch.optim.AdamW
-        opt_kwargs = {'betas': (0.9, 0.999),
-                    'weight_decay': 1e-2,
-                    'eps': 1e-08}
-        opt_kwargs.update(opt_params)
-    elif opt_type == 'adafactor':
-        opt_class = transformers.optimization.Adafactor
-        opt_kwargs = {'scale_parameter': False,
-                    'relative_step': False,
-                    'warmup_init': False}
 
-    return opt_class, opt_kwargs       
-     
+def build_opt(opt_type, opt_params={}):
+    if opt_type in ["adamw", "adam"]:
+        opt_class = torch.optim.AdamW
+        opt_kwargs = {"betas": (0.9, 0.999), "weight_decay": 1e-2, "eps": 1e-08}
+        opt_kwargs.update(opt_params)
+    elif opt_type == "adafactor":
+        opt_class = transformers.optimization.Adafactor
+        opt_kwargs = {
+            "scale_parameter": False,
+            "relative_step": False,
+            "warmup_init": False,
+        }
+
+    return opt_class, opt_kwargs

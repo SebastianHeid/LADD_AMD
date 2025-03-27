@@ -1,0 +1,21 @@
+seed: 42
+distill_method: "LADD"
+model:
+  name: "SD_Turbo"
+  path:  "/export/scratch/sheid/models/stable-diffusion-2-1-base"
+
+unet:
+  checkpoints_path:  "/export/data/sheid/LADD_results/checkpoints/training_3/add_v21_base_training3/checkpoint-15750/pytorch_model.bin"
+  load_checkpoints: True
+
+dataset:
+  prompts:
+    name: "coco_val"
+    path: "/export/data/vislearn/rother_subgroup/dzavadsk/datasets/coco2017/coco2017_image_captions_val.json"
+
+generated_images_path: "/export/data/sheid/LADD_results/generated_data_coco/training_3/"
+
+real_images_path: "/export/data/vislearn/rother_subgroup/dzavadsk/datasets/coco2017/val2017/"
+
+distill_method: "LADD"
+num_inference_steps: 1

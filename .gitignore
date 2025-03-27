@@ -1,0 +1,4 @@
+core/__pycache__/
+core/data/__pycache__/
+core/network/__pycache__/
+logging/

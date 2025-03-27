@@ -14,62 +14,76 @@
 
 import os
 
-def build_disc(basemodel,config,  multiscale_D=False):
-    if basemodel in ['stabilityai/stable-diffusion-2-1-base',
-                    'stabilityai/stable-diffusion-xl-base-1.0']:
+
+def build_disc(basemodel, config, multiscale_D=False):
+    if basemodel in [
+        "stabilityai/stable-diffusion-2-1-base",
+        "stabilityai/stable-diffusion-xl-base-1.0",
+    ]:
         from .unet_D import Discriminator
+
         return Discriminator(basemodel, config, multiscale_D)
-    
-    elif basemodel in ['PixArt-alpha/PixArt-Sigma-XL-2-1024-MS']:
+
+    elif basemodel in ["PixArt-alpha/PixArt-Sigma-XL-2-1024-MS"]:
         from .transformer_D import Transformer2DDiscriminator
+
         return Transformer2DDiscriminator(basemodel, multiscale_D)
-    
+
     else:
-        raise Exception('undefined base model:', basemodel)
+        raise Exception("undefined base model:", basemodel)
+
 
 def build_target_model(basemodel, ckpt_path=None):
-    if basemodel in ['stabilityai/stable-diffusion-2-1-base',
-                    'stabilityai/stable-diffusion-xl-base-1.0']:
+    if basemodel in [
+        "stabilityai/stable-diffusion-2-1-base",
+        "stabilityai/stable-diffusion-xl-base-1.0",
+    ]:
         from diffusers import UNet2DConditionModel
+
         model_tag = basemodel
         if ckpt_path is not None:
-            model_tag = os.path.join(ckpt_path, 'unet')
-        model = UNet2DConditionModel.from_pretrained(
-                model_tag, subfolder='unet')
+            model_tag = os.path.join(ckpt_path, "unet")
+        model = UNet2DConditionModel.from_pretrained(model_tag, subfolder="unet")
         return model
-    
-    elif basemodel in ['PixArt-alpha/PixArt-Sigma-XL-2-1024-MS']:
+
+    elif basemodel in ["PixArt-alpha/PixArt-Sigma-XL-2-1024-MS"]:
         from diffusers import PixArtTransformer2DModel
+
         model_tag = basemodel
         if ckpt_path is not None:
-            model_tag = os.path.join(ckpt_path, 'transformer')
-        model = PixArtTransformer2DModel.from_pretrained(model_tag, subfolder='transformer')
+            model_tag = os.path.join(ckpt_path, "transformer")
+        model = PixArtTransformer2DModel.from_pretrained(
+            model_tag, subfolder="transformer"
+        )
         return model
-    
+
     else:
-        raise Exception('undefined base model:', basemodel)
+        raise Exception("undefined base model:", basemodel)
+
 
 def build_pipeline(basemodel, model_state_dict=None, scheduler=None):
-    if basemodel in ['stabilityai/stable-diffusion-2-1-base',
-                    'stabilityai/stable-diffusion-xl-base-1.0']:
+    if basemodel in [
+        "stabilityai/stable-diffusion-2-1-base",
+        "stabilityai/stable-diffusion-xl-base-1.0",
+    ]:
         from diffusers import DiffusionPipeline
-        kwargs = {'requires_safety_checker': False,
-                'safety_checker': None}
+
+        kwargs = {"requires_safety_checker": False, "safety_checker": None}
         if scheduler is not None:
-            kwargs['scheduler'] = scheduler
-        pipe = DiffusionPipeline.from_pretrained(basemodel,
-                                    **kwargs)
+            kwargs["scheduler"] = scheduler
+        pipe = DiffusionPipeline.from_pretrained(basemodel, **kwargs)
         if model_state_dict is not None:
             pipe.unet.load_state_dict(model_state_dict)
         return pipe
-    
-    elif basemodel in ['PixArt-alpha/PixArt-Sigma-XL-2-1024-MS']:
+
+    elif basemodel in ["PixArt-alpha/PixArt-Sigma-XL-2-1024-MS"]:
         from diffusers import PixArtSigmaPipeline
+
         kwargs = {}
         pipe = PixArtSigmaPipeline.from_pretrained(basemodel, **kwargs)
         if model_state_dict is not None:
             pipe.transformer.load_state_dict(model_state_dict)
         return pipe
-    
+
     else:
-        raise Exception('undefined base model:', basemodel)
+        raise Exception("undefined base model:", basemodel)

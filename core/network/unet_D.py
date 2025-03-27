@@ -12,20 +12,22 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from diffusers import UNet2DConditionModel
-import torch.nn as nn
-import torch
-from typing import Union, Optional, Dict
+from typing import Dict, Optional, Union
 
-#based_on diffusers 0.29.2
+import torch
+import torch.nn as nn
+from diffusers import UNet2DConditionModel
+
+
+# based_on diffusers 0.29.2
 def unet_forward(
-        self,
-        sample: torch.Tensor,
-        timestep: Union[torch.Tensor, float, int],
-        encoder_hidden_states: torch.Tensor,
-        added_cond_kwargs: Optional[Dict[str, torch.Tensor]] = None,
-        is_multiscale = False,
-    ):        
+    self,
+    sample: torch.Tensor,
+    timestep: Union[torch.Tensor, float, int],
+    encoder_hidden_states: torch.Tensor,
+    added_cond_kwargs: Optional[Dict[str, torch.Tensor]] = None,
+    is_multiscale=False,
+):
 
     # 0. center input if necessary
     if self.config.center_input_sample:
@@ -37,7 +39,9 @@ def unet_forward(
     aug_emb = None
 
     aug_emb = self.get_aug_embed(
-        emb=emb, encoder_hidden_states=encoder_hidden_states, added_cond_kwargs=added_cond_kwargs
+        emb=emb,
+        encoder_hidden_states=encoder_hidden_states,
+        added_cond_kwargs=added_cond_kwargs,
     )
 
     emb = emb + aug_emb if aug_emb is not None else emb
@@ -56,7 +60,10 @@ def unet_forward(
 
     down_block_res_samples = (sample,)
     for blk_ind, downsample_block in enumerate(self.down_blocks):
-        if hasattr(downsample_block, "has_cross_attention") and downsample_block.has_cross_attention:
+        if (
+            hasattr(downsample_block, "has_cross_attention")
+            and downsample_block.has_cross_attention
+        ):
             # For t2i-adapter CrossAttnDownBlock2D
             additional_residuals = {}
 
@@ -77,7 +84,10 @@ def unet_forward(
 
     # 4. mid
     if self.mid_block is not None:
-        if hasattr(self.mid_block, "has_cross_attention") and self.mid_block.has_cross_attention:
+        if (
+            hasattr(self.mid_block, "has_cross_attention")
+            and self.mid_block.has_cross_attention
+        ):
             sample = self.mid_block(
                 sample,
                 emb,
@@ -89,17 +99,17 @@ def unet_forward(
         else:
             sample = self.mid_block(sample, emb)
 
-
     feat_list.append(sample)
     return feat_list
-
 
 
 class Discriminator(nn.Module):
     def __init__(self, pretrained_path, config, is_multiscale=False):
         super().__init__()
         self.config = config
-        self.unet = UNet2DConditionModel.from_pretrained(pretrained_path, subfolder="unet")
+        self.unet = UNet2DConditionModel.from_pretrained(
+            pretrained_path, subfolder="unet"
+        )
         self.unet.forward = unet_forward
         self.unet.up_blocks = None
         self.unet.conv_out = None
@@ -111,54 +121,79 @@ class Discriminator(nn.Module):
             channel_list = [320, 640, 1280]
         else:
             channel_list = [1280]
-      
+
         if self.config.discriminator.clip_conditioning:
-            channel_list = [channel + self.config.discriminator.clip_embedding_dim for channel in channel_list]
+            channel_list = [
+                channel + self.config.discriminator.clip_embedding_dim
+                for channel in channel_list
+            ]
         if self.config.discriminator.noise_conditioning:
-            channel_list = [channel + self.config.discriminator.noise_embedding_dim for channel in channel_list]
+            channel_list = [
+                channel + self.config.discriminator.noise_embedding_dim
+                for channel in channel_list
+            ]
 
-        
         for feat_c in channel_list:
-            self.heads.append(nn.Sequential(nn.GroupNorm(32, feat_c, eps=1e-05, affine=True),
-                                        nn.Conv2d(feat_c, feat_c//4, 4, 2, 2),
-                                        nn.SiLU(),
-                                        nn.Conv2d(feat_c//4,1,1,1,0)
-                                            ))
+            self.heads.append(
+                nn.Sequential(
+                    nn.GroupNorm(32, feat_c, eps=1e-05, affine=True),
+                    nn.Conv2d(feat_c, feat_c // 4, 4, 2, 2),
+                    nn.SiLU(),
+                    nn.Conv2d(feat_c // 4, 1, 1, 1, 0),
+                )
+            )
         self.heads = nn.ModuleList(self.heads)
-        self.clip_embedding_layer = nn.Linear(1024, self.config.discriminator.clip_embedding_dim)
-        self.noise_embedding_layer = nn.Linear(1, self.config.discriminator.noise_embedding_dim)
-        
-
- 
+        self.clip_embedding_layer = nn.Linear(
+            1024, self.config.discriminator.clip_embedding_dim
+        )
+        self.noise_embedding_layer = nn.Linear(
+            1, self.config.discriminator.noise_embedding_dim
+        )
 
     @property
     def model(self):
         return self.unet
-        
-    def forward(self, latent, timesteps, encoder_hidden_states,
-                added_cond_kwargs: Optional[Dict[str, torch.Tensor]] = None):
-        feat_list = self.unet.forward(self.unet, latent, timesteps, encoder_hidden_states, 
-                                        is_multiscale=self.is_multiscale,
-                                        added_cond_kwargs=added_cond_kwargs)
-     
+
+    def forward(
+        self,
+        latent,
+        timesteps,
+        encoder_hidden_states,
+        added_cond_kwargs: Optional[Dict[str, torch.Tensor]] = None,
+    ):
+        feat_list = self.unet.forward(
+            self.unet,
+            latent,
+            timesteps,
+            encoder_hidden_states,
+            is_multiscale=self.is_multiscale,
+            added_cond_kwargs=added_cond_kwargs,
+        )
+
         res_list = []
-        
+
         for cur_feat, cur_head in zip(feat_list, self.heads):
             if self.config.discriminator.clip_conditioning:
                 clip_cond = encoder_hidden_states.mean(dim=1)
-                clip_cond = self.clip_embedding_layer(clip_cond).unsqueeze(-1).unsqueeze(-1)
+                clip_cond = (
+                    self.clip_embedding_layer(clip_cond).unsqueeze(-1).unsqueeze(-1)
+                )
                 clip_cond = clip_cond.expand(-1, -1, cur_feat.size(2), cur_feat.size(3))
                 cur_feat = torch.cat([cur_feat, clip_cond], dim=1)
             if self.config.discriminator.noise_conditioning:
                 noise_cond = timesteps.unsqueeze(-1).to(torch.bfloat16)
-                noise_cond = self.noise_embedding_layer(noise_cond).unsqueeze(-1).unsqueeze(-1)
-                noise_cond = noise_cond.expand(-1, -1, cur_feat.size(2), cur_feat.size(3))
+                noise_cond = (
+                    self.noise_embedding_layer(noise_cond).unsqueeze(-1).unsqueeze(-1)
+                )
+                noise_cond = noise_cond.expand(
+                    -1, -1, cur_feat.size(2), cur_feat.size(3)
+                )
                 cur_feat = torch.cat([cur_feat, noise_cond], dim=1)
             cur_out = cur_head(cur_feat)
             res_list.append(cur_out.reshape(cur_out.shape[0], -1))
-        
+
         concat_res = torch.cat(res_list, dim=1)
-        
+
         return concat_res
 
     def save_pretrained(self, path):

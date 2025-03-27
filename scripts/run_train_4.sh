@@ -45,5 +45,6 @@ accelerate launch --mixed_precision bf16 --num_machines 1 --num_processes 1 --gp
     --misaligned_pairs_D \
     --report_to=wandb \
     --project_dir='/export/home/sheid/LADD_AMD/logging' \
+    --resume_from_checkpoint='/export/data/sheid/LADD_results/checkpoints/training_4/add_v21_base_training4/checkpoint-4250' \
 
 

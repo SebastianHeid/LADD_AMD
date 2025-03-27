@@ -15,7 +15,7 @@
 PROMPT_PATH='/export/home/sheid/AMD-Diffusion-Distillation/data/sample_prompts.txt'
 OUT_FOLDER='/export/data/vislearn/rother_subgroup/sheid/LAION_LADD'
 
-available_gpus=(5)
+available_gpus=(9)
 for gpu in "${available_gpus[@]}"; do
 CUDA_VISIBLE_DEVICES=${gpu} python3 core/tools/gen_synthetic_data.py --prompt_path $PROMPT_PATH --root_folder $OUT_FOLDER &
 done
