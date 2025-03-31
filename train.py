@@ -15,6 +15,8 @@
 import argparse
 import logging
 import os
+import sys
+from logging.handlers import RotatingFileHandler
 
 import diffusers
 import numpy as np
@@ -28,13 +30,6 @@ from accelerate import Accelerator
 from accelerate.logging import get_logger
 from accelerate.utils import DistributedType
 from box import Box
-from diffusers import DDPMScheduler
-from diffusers.optimization import get_scheduler
-from diffusers.utils.import_utils import is_xformers_available
-from packaging import version
-from torch.utils.data import default_collate
-from tqdm.auto import tqdm
-
 from core.data.dataset import ADDDataset
 from core.network.build import build_disc, build_pipeline, build_target_model
 from core.optimizers import build_opt
@@ -42,8 +37,16 @@ from core.utils import (
     change_device,
     concat_dict,
     keep_max_checkpoints,
+    logit_normal_discrete_sample,
     predicted_origin,
 )
+from diffusers import DDPMScheduler
+from diffusers.optimization import get_scheduler
+from diffusers.utils.import_utils import is_xformers_available
+from elatentlpips import ELatentLPIPS
+from packaging import version
+from torch.utils.data import default_collate
+from tqdm.auto import tqdm
 
 logger = get_logger(__name__)
 
@@ -55,17 +58,17 @@ def set_fsdp_env():
     os.environ["FSDP_TRANSFORMER_CLS_TO_WRAP"] = "PixArtTransformer2DModel"
 
 
-def log_validation(model_state_dict, accelerator, scheduler, timestep_list, args):
+def log_validation(model_state_dict, accelerator, scheduler, timestep_list, config):
     logger.info("Running validation... ")
     torch.cuda.empty_cache()
 
-    pipe = build_pipeline(args.base_model, model_state_dict, scheduler)
+    pipe = build_pipeline(config.base_model, model_state_dict, scheduler)
     pipe.to(accelerator.device)
 
-    if args.seed is None:
+    if config.seed is None:
         generator = None
     else:
-        generator = torch.Generator(device=accelerator.device).manual_seed(args.seed)
+        generator = torch.Generator(device=accelerator.device).manual_seed(config.seed)
 
     validation_prompts = [
         "A beautiful dessert waiting to be shared by two people",
@@ -82,7 +85,7 @@ def log_validation(model_state_dict, accelerator, scheduler, timestep_list, args
         for _ in range(4):
             image = pipe(
                 prompt,
-                num_inference_steps=args.num_ts,
+                num_inference_steps=config.generator.num_ts,
                 timesteps=timestep_list,
                 generator=generator,
                 guidance_scale=0,
@@ -365,8 +368,61 @@ def parse_args():
     return args
 
 
-def main(args, config):
-    if args.use_fsdp:
+def configure_logging(config):
+    # Set up main logger
+    logger = logging.getLogger()
+    logger.setLevel(logging.DEBUG)
+
+    # File handler with rotation
+    file_handler = RotatingFileHandler(
+        config.log_file,
+        maxBytes=10 * 1024 * 1024,
+        backupCount=5,  # 10MB
+    )
+    file_handler.setFormatter(
+        logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
+    )
+
+    # Console handler
+    console_handler = logging.StreamHandler()
+    console_handler.setLevel(logging.INFO)
+
+    logger.addHandler(file_handler)
+    logger.addHandler(console_handler)
+
+    # Redirect stdout and stderr
+    sys.stdout = StreamToLogger(logging.INFO)
+    sys.stderr = StreamToLogger(logging.ERROR)
+
+
+class StreamToLogger:
+    """Fake file-like stream object that redirects to logger"""
+
+    def __init__(self, log_level):
+        self.log_level = log_level
+        self.buffer = []
+
+    def write(self, message):
+        if message.strip():
+            self.buffer.append(message.strip())
+
+    def flush(self):
+        if self.buffer:
+            logging.log(self.log_level, "\n".join(self.buffer))
+            self.buffer = []
+
+
+# Install exception hook
+def handle_exception(exc_type, exc_value, exc_traceback):
+    logging.error("Uncaught exception", exc_info=(exc_type, exc_value, exc_traceback))
+
+
+sys.excepthook = handle_exception
+
+
+def main(config):
+
+    if config.use_fsdp:
         from accelerate import FullyShardedDataParallelPlugin
         from torch.distributed.fsdp.fully_sharded_data_parallel import (
             FullOptimStateDictConfig,
@@ -381,22 +437,24 @@ def main(args, config):
         fsdp_plugin = None
 
     accelerator = Accelerator(
-        gradient_accumulation_steps=args.gradient_accumulation_steps,
-        mixed_precision=args.mixed_precision,
-        log_with=args.report_to,
+        gradient_accumulation_steps=config.gradient_accumulation_steps,
+        mixed_precision=config.mixed_precision,
+        log_with=config.report_to,
         split_batches=True,
         fsdp_plugin=fsdp_plugin,
-        project_dir=args.project_dir,
+        project_dir=config.project_dir,
     )
 
     if accelerator.is_main_process:
         accelerator.init_trackers(
-            project_name=args.project_name,
-            config=args,
-            init_kwargs={"wandb": {"name": args.exp_name}},
+            project_name=config.project_name,
+            config=config,
+            init_kwargs={"wandb": {"name": config.exp_name}},
         )
 
-    ckpt_dir = os.path.join(args.ckpt_folder, args.project_name + "_" + args.exp_name)
+    ckpt_dir = os.path.join(
+        config.ckpt_folder, config.project_name + "_" + config.exp_name
+    )
     os.makedirs(ckpt_dir, exist_ok=True)
 
     # Make one log on every process with the configuration for debugging.
@@ -414,10 +472,10 @@ def main(args, config):
         diffusers.utils.logging.set_verbosity_error()
 
     noise_scheduler = DDPMScheduler.from_pretrained(
-        args.base_model, subfolder="scheduler"
+        config.base_model, subfolder="scheduler"
     )
 
-    if args.zero_snr:
+    if config.zero_snr:
 
         def add_noise(
             self,
@@ -455,8 +513,8 @@ def main(args, config):
     alpha_schedule = torch.sqrt(noise_scheduler.alphas_cumprod)
     sigma_schedule = torch.sqrt(1 - noise_scheduler.alphas_cumprod)
 
-    disc = build_disc(args.base_model, config, args.multiscale_D)
-    target_model = build_target_model(args.base_model)
+    disc = build_disc(config.base_model, config, config.multiscale_D)
+    target_model = build_target_model(config.base_model)
 
     disc.train()
     target_model.train()
@@ -469,7 +527,7 @@ def main(args, config):
     sigma_schedule = sigma_schedule.to(accelerator.device)
 
     # 12. Enable optimizations
-    if args.enable_xformers_memory_efficient_attention:
+    if config.enable_xformers_memory_efficient_attention:
         if is_xformers_available():
             import xformers
 
@@ -484,68 +542,81 @@ def main(args, config):
                 "xformers is not available. Make sure it is installed correctly"
             )
 
-    if args.gradient_checkpointing:
+    if config.gradient_checkpointing:
         target_model.enable_gradient_checkpointing()
         disc.model.enable_gradient_checkpointing()
 
     target_model, disc = accelerator.prepare(target_model, disc)
 
-    opt_class, opt_kwargs = build_opt(args.optimizer)
-    optimizer_G = opt_class(target_model.parameters(), lr=args.G_lr, **opt_kwargs)
+    opt_class, opt_kwargs = build_opt(config.optimizer)
+    optimizer_G = opt_class(
+        target_model.parameters(), lr=config.generator.lr, **opt_kwargs
+    )
 
-    optimizer_D = opt_class(disc.parameters(), lr=args.D_lr, **opt_kwargs)
+    optimizer_D = opt_class(disc.parameters(), lr=config.discriminator.lr, **opt_kwargs)
 
-    dataset_root = "/export/data/vislearn/rother_subgroup/sheid/LAION_LADD/"
-    data_pkl_name = "summary.pkl"
-    train_dataset = ADDDataset(dataset_root, data_pkl_name)
+    train_dataset = ADDDataset(config.dataset_root, config.data_pkl_name)
+    print(train_dataset.__len__())
     train_dataloader = torch.utils.data.DataLoader(
         train_dataset,
         shuffle=True,
         collate_fn=default_collate,
-        batch_size=args.train_batch_size,
-        num_workers=args.dataloader_num_workers,
+        batch_size=config.train_batch_size,
+        num_workers=config.dataloader_num_workers,
         pin_memory=True,
         drop_last=True,
     )
 
     lr_scheduler = get_scheduler(
-        args.lr_scheduler,
+        config.lr_scheduler,
         optimizer=optimizer_G,
-        num_warmup_steps=args.lr_warmup_steps,
-        num_training_steps=args.max_train_steps,
+        num_warmup_steps=config.lr_warmup_steps,
+        num_training_steps=config.max_train_steps,
     )
 
     optimizer_G, optimizer_D, lr_scheduler = accelerator.prepare(
         optimizer_G, optimizer_D, lr_scheduler
     )
 
-    if args.resume_from_checkpoint:
-        accelerator.load_state(args.resume_from_checkpoint)
+    if config.resume_from_checkpoint:
+        accelerator.load_state(config.resume_from_checkpoint)
 
     total_batch_size = (
-        args.train_batch_size
+        config.train_batch_size
         * accelerator.num_processes
-        * args.gradient_accumulation_steps
+        * config.gradient_accumulation_steps
     )
+
+    if config.reconstruction_loss.type == "elatentlpips":
+        ReconstructionLoss = (
+            ELatentLPIPS(
+                encoder=config.reconstruction_loss.elatentlpips.encoder,
+                augment=config.reconstruction_loss.elatentlpips.augment,
+            )
+            .to("cuda")
+            .eval()
+        )
+    elif config.reconstruction_loss.type == "l1":
+        ReconstructionLoss = F.smooth_l1_loss
 
     logger.info("***** Running training *****")
     logger.info(
-        f"  Num batches each epoch = {len(train_dataset) // args.train_batch_size}"
+        f"  Num batches each epoch = {len(train_dataset) // config.train_batch_size}"
     )
-    logger.info(f"  Instantaneous batch size per device = {args.train_batch_size}")
+    logger.info(f"  Instantaneous batch size per device = {config.train_batch_size}")
     logger.info(
         f"  Total train batch size (w. parallel, distributed & accumulation) = {total_batch_size}"
     )
-    logger.info(f"  Gradient Accumulation steps = {args.gradient_accumulation_steps}")
-    logger.info(f"  Total optimization steps = {args.max_train_steps}")
+    logger.info(f"  Gradient Accumulation steps = {config.gradient_accumulation_steps}")
+    logger.info(f"  Total optimization steps = {config.max_train_steps}")
 
     global_step = 0
-    if args.resume_from_checkpoint:
-        global_step = int(args.resume_from_checkpoint.split("-")[-1]) + 1
+    if config.resume_from_checkpoint:
+        global_step = int(config.resume_from_checkpoint.split("-")[-1]) + 1
         logger.info(f"Resuming from global step {global_step}")
 
     progress_bar = tqdm(
-        range(0, args.max_train_steps),
+        range(0, config.max_train_steps),
         initial=global_step,
         desc="Steps",
         disable=not accelerator.is_local_main_process,
@@ -555,7 +626,7 @@ def main(args, config):
     phase = "G"
 
     D_ts_list = []
-    for cur_ts_item in args.D_ts.split(","):
+    for cur_ts_item in config.D_ts.split(","):
         if "-" in cur_ts_item:
             start_ind, end_ind = cur_ts_item.split("-")
             D_ts_list += list(range(int(start_ind), int(end_ind)))
@@ -563,12 +634,14 @@ def main(args, config):
             D_ts_list.append(int(cur_ts_item))
     ts_D_choices = torch.tensor(D_ts_list, device=accelerator.device).long()
 
-    if args.num_ts == 1 and "PixArt" in args.base_model:
+    if config.generator.num_ts == 1 and "PixArt" in config.base_model:
         timestep_list = np.array(
             [400.0]
         )  # Refer Appendix A.1 of https://arxiv.org/pdf/2403.04692
     else:
-        timestep_list = np.linspace(1000, 0, num=args.num_ts, endpoint=False) - 1
+        timestep_list = (
+            np.linspace(1000, 0, num=config.generator.num_ts, endpoint=False) - 1
+        )
     timestep_list = torch.tensor(timestep_list).long()
     timestep_list = timestep_list.to(accelerator.device)
 
@@ -586,7 +659,7 @@ def main(args, config):
             bsz = latents.shape[0]
             added_cond_kwargs = {"resolution": None, "aspect_ratio": None}
 
-            if config.generator.warm_up and args.num_ts == 4:
+            if config.generator.warm_up and config.generator.num_ts == 4:
                 if step < config.generator.warm_up_steps:
                     ts_indices = torch.multinomial(
                         torch.tensor(config.generator.warm_up_prob),
@@ -601,11 +674,11 @@ def main(args, config):
                         replacement=True,
                     )
             else:
-                ts_indices = torch.randint(0, args.num_ts, (bsz,))
+                ts_indices = torch.randint(0, config.generator.num_ts, (bsz,))
             timesteps = timestep_list[ts_indices].long()
 
             if (
-                args.num_ts == 1 and "PixArt" in args.base_model
+                config.generator.num_ts == 1 and "PixArt" in config.base_model
             ):  # Refer Appendix A.1 of https://arxiv.org/pdf/2403.04692
                 timesteps_for_init_noise = torch.tensor([999.0])[ts_indices].long()
                 noisy_model_input = noise_scheduler.add_noise(
@@ -628,7 +701,7 @@ def main(args, config):
                         **text_embs,
                     ).sample
 
-                    if "PixArt" in args.base_model:
+                    if "PixArt" in config.base_model:
                         noise_pred = noise_pred.chunk(2, dim=1)[0]
 
                     pred_x_0 = predicted_origin(
@@ -641,11 +714,20 @@ def main(args, config):
                     )
 
                     # add noise to generated latents and feed them to D
-                    timesteps_D = ts_D_choices[
-                        torch.randint(
-                            0, len(ts_D_choices), (bsz,), device=accelerator.device
-                        )
-                    ]
+                    # timesteps_D = ts_D_choices[
+                    #     torch.randint(
+                    #         0, len(ts_D_choices), (bsz,), device=accelerator.device
+                    #     )
+                    # ]
+                    timesteps_D = logit_normal_discrete_sample(
+                        ts_D_choices,
+                        bsz,
+                        ts_D_choices.device,
+                        config.noise_mean,
+                        config.noise_std,
+                    )
+                    print(timesteps_D)
+
                     noised_predicted_x0 = noise_scheduler.add_noise(
                         pred_x_0, torch.randn_like(latents), timesteps_D
                     )
@@ -663,20 +745,23 @@ def main(args, config):
                     )
 
                     # recon loss
-                    recon_loss = F.smooth_l1_loss(pred_x_0, latents)
+                    if config.reconstruction_loss.flag:
+                        recon_loss = ReconstructionLoss(latents, pred_x_0).mean()
 
                     # total loss
-                    loss = adv_loss + recon_loss * args.recon_lambda
+                    loss = (
+                        adv_loss + recon_loss * config.reconstruction_loss.recon_lambda
+                    )
 
                     accelerator.backward(loss)
                     if accelerator.sync_gradients:
                         if accelerator.distributed_type == DistributedType.FSDP:
                             grad_norm = accelerator._models[0].clip_grad_norm_(
-                                args.max_grad_norm, 2
+                                config.max_grad_norm, 2
                             )
                         else:
                             grad_norm = accelerator.clip_grad_norm_(
-                                target_model.parameters(), args.max_grad_norm
+                                target_model.parameters(), config.max_grad_norm
                             )
                         if torch.logical_or(grad_norm.isnan(), grad_norm.isinf()):
                             optimizer_G.zero_grad(set_to_none=True)
@@ -715,7 +800,7 @@ def main(args, config):
                             **text_embs,
                         ).sample
 
-                        if "PixArt" in args.base_model:
+                        if "PixArt" in config.base_model:
                             noise_pred = noise_pred.chunk(2, dim=1)[0]
 
                         pred_x_0 = predicted_origin(
@@ -727,16 +812,30 @@ def main(args, config):
                             sigma_schedule,
                         )
 
-                    timesteps_D_fake = ts_D_choices[
-                        torch.randint(
-                            0, len(ts_D_choices), (bsz,), device=accelerator.device
-                        )
-                    ]
-                    timesteps_D_real = ts_D_choices[
-                        torch.randint(
-                            0, len(ts_D_choices), (bsz,), device=accelerator.device
-                        )
-                    ]
+                    # timesteps_D_fake = ts_D_choices[
+                    #     torch.randint(
+                    #         0, len(ts_D_choices), (bsz,), device=accelerator.device
+                    #     )
+                    # ]
+                    timesteps_D_fake = logit_normal_discrete_sample(
+                        ts_D_choices,
+                        bsz,
+                        ts_D_choices.device,
+                        config.noise_mean,
+                        config.noise_std,
+                    )
+                    # timesteps_D_real = ts_D_choices[
+                    #     torch.randint(
+                    #         0, len(ts_D_choices), (bsz,), device=accelerator.device
+                    #     )
+                    # ]
+                    timesteps_D_real = logit_normal_discrete_sample(
+                        ts_D_choices,
+                        bsz,
+                        ts_D_choices.device,
+                        config.noise_mean,
+                        config.noise_std,
+                    )
                     noised_predicted_x0 = noise_scheduler.add_noise(
                         pred_x_0, torch.randn_like(latents), timesteps_D_fake
                     )
@@ -744,11 +843,14 @@ def main(args, config):
                         latents, torch.randn_like(latents), timesteps_D_real
                     )
 
-                    if args.misaligned_pairs_D and bsz > 1:
+                    if config.misaligned_pairs_D and bsz > 1:
                         shifted_latents = torch.roll(latents, 1, 0)
                         timesteps_D_shifted_pairs = ts_D_choices[
                             torch.randint(
-                                0, len(ts_D_choices), (bsz,), device=accelerator.device
+                                0,
+                                len(ts_D_choices),
+                                (bsz,),
+                                device=accelerator.device,
                             )
                         ]
                         noised_shifted_latents = noise_scheduler.add_noise(
@@ -794,11 +896,11 @@ def main(args, config):
                     if accelerator.sync_gradients:
                         if accelerator.distributed_type == DistributedType.FSDP:
                             grad_norm = accelerator._models[1].clip_grad_norm_(
-                                args.max_grad_norm, 2
+                                config.max_grad_norm, 2
                             )
                         else:
                             grad_norm = accelerator.clip_grad_norm_(
-                                disc.parameters(), args.max_grad_norm
+                                disc.parameters(), config.max_grad_norm
                             )
                         if torch.logical_or(grad_norm.isnan(), grad_norm.isinf()):
                             optimizer_G.zero_grad(set_to_none=True)
@@ -829,7 +931,7 @@ def main(args, config):
             if accelerator.sync_gradients:
                 if (
                     global_step
-                    and global_step % args.checkpointing_steps == 0
+                    and global_step % config.checkpointing_steps == 0
                     and phase == "D"
                 ):
                     save_path = os.path.join(ckpt_dir, f"checkpoint-{global_step}")
@@ -841,15 +943,15 @@ def main(args, config):
                         logger.info("error saving ckpts")
                         print(e)
                     if accelerator.is_main_process:
-                        keep_max_checkpoints(ckpt_dir, args.max_checkpoints_to_keep)
+                        keep_max_checkpoints(ckpt_dir, config.max_checkpoints_to_keep)
                         logger.info(f"Saved state to {save_path}")
 
                 if (
                     global_step
-                    and global_step % args.validation_steps == 0
+                    and global_step % config.validation_steps == 0
                     and phase == "D"
                 ):
-                    if args.use_fsdp:
+                    if config.use_fsdp:
                         model_state_dict = target_model.state_dict()
                     else:
                         model_state_dict = accelerator.unwrap_model(
@@ -861,12 +963,12 @@ def main(args, config):
                             accelerator,
                             noise_scheduler,
                             list(timestep_list.cpu().numpy()),
-                            args,
+                            config,
                         )
                         torch.cuda.empty_cache()
                 accelerator.wait_for_everyone()
 
-            if global_step >= args.max_train_steps:
+            if global_step >= config.max_train_steps:
                 accelerator.wait_for_everyone()
                 if accelerator.is_main_process:
                     save_path = os.path.join(ckpt_dir, f"checkpoint-{global_step}")
@@ -886,4 +988,9 @@ if __name__ == "__main__":
     args = parse_args()
     with open(args.config_path, "r") as file:
         config = Box(yaml.safe_load(file))
-    main(args, config)
+    configure_logging(config)
+    try:
+        main(config)
+    except Exception as e:
+        logging.critical("Training failed", exc_info=True)
+        raise
