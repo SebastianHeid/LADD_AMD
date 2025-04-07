@@ -48,6 +48,7 @@ txt_emb_folder = "txt_embs"
 noise_folder = "noises"
 
 res_list = []
+
 for fname in tqdm(os.listdir(os.path.join(args.root_folder, latent_folder))):
     latent_rel_path = os.path.join(latent_folder, fname)
     txt_emb_rel_path = os.path.join(txt_emb_folder, fname)

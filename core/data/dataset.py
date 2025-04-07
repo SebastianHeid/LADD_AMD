@@ -24,14 +24,11 @@ warnings.filterwarnings("error", category=UserWarning, module="PIL")
 
 
 class ADDDataset(Dataset):
-    def __init__(
-        self,
-        data_root,
-        pkl_name,
-    ):
+    def __init__(self, config):
 
-        self.data_root = data_root
-        self.pkl_name = pkl_name
+        self.data_root = config.dataset_root
+        self.pkl_name = config.data_pkl_name
+        self.gen_data_root = config.generator.dataset_root
 
         self._load_flist()
         self._length = len(self.flist)
@@ -60,7 +57,13 @@ class ADDDataset(Dataset):
                 txt_emb["encoder_hidden_states"] = txt_emb[
                     "encoder_hidden_states"
                 ].float()
-
+                if self.gen_data_root:
+                    txt_emb_gen = torch.load(
+                        os.path.join(self.gen_data_root, txt_emb_path)
+                    )
+                    txt_emb_gen["encoder_hidden_states"] = txt_emb_gen[
+                        "encoder_hidden_states"
+                    ].float()
             except Exception as e:
                 print("error when loading file: %s" % latent_path)
                 print(e)
@@ -70,4 +73,7 @@ class ADDDataset(Dataset):
                     ind = np.random.randint(0, len(self.flist) - 1)
                     continue
             break
-        return (latent, noise, txt_emb)
+        if self.gen_data_root:
+            return (latent, noise, txt_emb, txt_emb_gen)
+        else:
+            return (latent, noise, txt_emb)

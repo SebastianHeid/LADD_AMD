@@ -1,0 +1,19 @@
+seed: 42
+
+model:
+  name: "SD_Turbo_org"
+  path:  "/export/scratch/sheid/models/sd_turbo"
+
+unet:
+  load_checkpoints: False
+
+dataset:
+  prompts:
+    name: "coco_val"
+    path: "/export/data/vislearn/rother_subgroup/dzavadsk/datasets/coco2017/coco2017_image_captions_val.json"
+
+generated_images_path: "/export/data/sheid/LADD_results/generated_data_coco/sdxl/"
+
+real_images_path: "/export/data/sheid/LADD_results/generated_data_coco/sdxl_ref/"
+distill_method: "SDXL"
+num_inference_steps: 50

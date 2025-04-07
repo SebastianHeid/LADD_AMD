@@ -12,10 +12,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# options: 'stabilityai/stable-diffusion-2-1-base', 'PixArt-alpha/PixArt-Sigma-XL-2-1024-MS'
+PROMPT_PATH='/export/home/sheid/AMD-Diffusion-Distillation/data/sample_prompts.txt'
+OUT_FOLDER='/export/data/vislearn/rother_subgroup/sheid/LAION_LADD_32'
 
-accelerate launch  --multi_gpu --main_process_port 29500  --mixed_precision no  --num_machines 1 --num_processes 2 --gpu_ids 6,7 train.py \
-    --config_path='/export/home/sheid/LADD_AMD/config/config_training_13.yaml' \
+available_gpus=(1)
+for gpu in "${available_gpus[@]}"; do
+CUDA_VISIBLE_DEVICES=${gpu} python3 core/tools/gen_synthetic_data.py --prompt_path $PROMPT_PATH --root_folder $OUT_FOLDER --save_precision fp32 &
+done
+wait
 
-
-
+# after generating data, run this to create a summary file
+python3 core/tools/create_summary.py --root_folder $OUT_FOLDER

@@ -143,12 +143,14 @@ class Discriminator(nn.Module):
                 )
             )
         self.heads = nn.ModuleList(self.heads)
-        self.clip_embedding_layer = nn.Linear(
-            1024, self.config.discriminator.clip_embedding_dim
-        )
-        self.noise_embedding_layer = nn.Linear(
-            1, self.config.discriminator.noise_embedding_dim
-        )
+        if self.config.discriminator.clip_conditioning:
+            self.clip_embedding_layer = nn.Linear(
+                1024, self.config.discriminator.clip_embedding_dim
+            )
+        if self.config.discriminator.noise_conditioning:
+            self.noise_embedding_layer = nn.Linear(
+                1, self.config.discriminator.noise_embedding_dim
+            )
 
     @property
     def model(self):

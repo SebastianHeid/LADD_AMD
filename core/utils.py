@@ -16,10 +16,28 @@ import os
 import re
 import shutil
 
+import numpy as np
 import torch
 from accelerate.logging import get_logger
+from scipy.special import expit
 
 logger = get_logger(__name__)
+
+
+def logit_normal_discrete_sample(noise_levels, bsz, device, m=0, s=1):
+    """Samples a discrete noise level from a logit-normal distribution."""
+    # Step 1: Sample from a normal distribution
+    normal_sample = np.random.normal(loc=m, scale=s, size=bsz)
+
+    # Step 2: Apply the sigmoid (logit-normal transformation)
+    logit_sample = expit(normal_sample)  # Maps value to [0,1]
+
+    # Step 3: Scale to discrete noise levels
+    indices = np.round(logit_sample * (len(noise_levels) - 1))
+    # Scale to index range
+
+    # Step 4: Return the corresponding noise level
+    return torch.tensor([noise_levels[int(idx)] for idx in indices], device=device)
 
 
 def extract_into_tensor(a, t, x_shape):

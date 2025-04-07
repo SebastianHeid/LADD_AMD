@@ -1,0 +1,73 @@
+base_model: 'stabilityai/stable-diffusion-2-1-base'
+dataset_root: '/export/data/vislearn/rother_subgroup/sheid/LAION_LADD/'
+ckpt_folder: '/export/data/sheid/LADD_results/checkpoints/training_13'
+project_dir: '/export/home/sheid/LADD_AMD/logging'
+resume_from_checkpoint: False
+log_file: "/export/home/sheid/LADD_AMD/log/training_13.log"
+data_pkl_name: 'summary.pkl' 
+exp_name: 'training13'
+project_name: 'add_v21_base'
+optimizer: "adamw" # ["adam", "adamw", "adafactor"]
+
+
+mixed_precision: 'no'
+report_to: 'wandb'
+lr_scheduler: 'constant' # ['linear', 'cosine', 'cosine_with_restarts', 'polynomial', 'constant', 'constant_with_warmup']
+D_ts: "0-750" # Timestep choices for Discriminator. Support two formats:
+                #choice1: 10, 249, 499, 749 for discrete values.
+                #choice2: 0-11, 200-250, 400-500, 700-750 for ranges.
+                #default is range 0-750
+
+checkpointing_steps: 250
+dataloader_num_workers: 0
+gradient_accumulation_steps: 4
+max_train_steps: 100000
+seed: 1
+train_batch_size: 16
+validation_steps: 500
+lr_warmup_steps: 500
+max_checkpoints_to_keep: 3
+
+
+local_rank: -1
+max_grad_norm: 1
+
+enable_xformers_memory_efficient_attention: False
+gradient_checkpointing: True
+zero_snr: True
+multiscale_D: True
+misaligned_pairs_D: True
+use_fsdp: False
+
+reconstruction_loss:
+  flag: True
+  type: "l1"
+  recon_lambda: 1
+  elatentlpips:
+    encoder: "sd21"
+    augment: "bg"
+ 
+
+generator:
+  warm_up: True
+  warm_up_steps: 1
+  warm_up_prob: [0, 0, 0.5, 0.5]
+  noise_prob: [0.7, 0.1, 0.1, 0.1]
+  lr: 0.000001
+  num_ts: 4  #Number of time steps to sample from the original 1000 time steps for training G. We train one-step model by default"
+  remove_last_layer: False
+  base_model: 'stabilityai/stable-diffusion-2-1-base'
+  dataset_root: ''
+  base_model_path: "/export/scratch/sheid/models/stable-diffusion-2-1-base"
+
+discriminator:
+  noise_conditioning: False
+  clip_conditioning: False
+  clip_embedding_dim: 320
+  noise_embedding_dim: 320
+  lr: 0.000001
+  noise_mean: 0
+  noise_std: 1
+  base_model: 'stabilityai/stable-diffusion-2-1-base'
+  base_model_path: "/export/scratch/sheid/models/stable-diffusion-2-1-base"
+

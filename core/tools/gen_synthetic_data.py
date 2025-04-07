@@ -132,8 +132,6 @@ if args.laion:
         ) as file:
             prompt = file.read()
             anno_list.append((str(ind), prompt))
-        if ind == 100000:
-            break
 else:
     with open(args.prompt_path, "r") as f:
         lines = f.readlines()
@@ -266,7 +264,7 @@ pipe.to("cuda")
 
 num_samples = len(anno_list)
 print(num_samples)
-for i in range(80000, 100000, 1):
+for i in range(500000, 600000, 1):
     prompt = anno_list[i][1]
     basename = anno_list[i][0] + ".png"
 

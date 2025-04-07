@@ -14,6 +14,9 @@
 
 import os
 
+import torch
+import torch.nn as nn
+
 
 def build_disc(basemodel, config, multiscale_D=False):
     if basemodel in [
@@ -22,7 +25,7 @@ def build_disc(basemodel, config, multiscale_D=False):
     ]:
         from .unet_D import Discriminator
 
-        return Discriminator(basemodel, config, multiscale_D)
+        return Discriminator(config.discriminator.base_model_path, config, multiscale_D)
 
     elif basemodel in ["PixArt-alpha/PixArt-Sigma-XL-2-1024-MS"]:
         from .transformer_D import Transformer2DDiscriminator
@@ -33,17 +36,38 @@ def build_disc(basemodel, config, multiscale_D=False):
         raise Exception("undefined base model:", basemodel)
 
 
-def build_target_model(basemodel, ckpt_path=None):
+def build_target_model(basemodel, config, ckpt_path=None):
     if basemodel in [
         "stabilityai/stable-diffusion-2-1-base",
         "stabilityai/stable-diffusion-xl-base-1.0",
     ]:
         from diffusers import UNet2DConditionModel
 
-        model_tag = basemodel
+        model_tag = config.generator.base_model_path
         if ckpt_path is not None:
             model_tag = os.path.join(ckpt_path, "unet")
         model = UNet2DConditionModel.from_pretrained(model_tag, subfolder="unet")
+        if config.generator.remove_last_layer:
+            # model.up_blocks[-1].resnets = torch.nn.ModuleList(
+            #     model.up_blocks[-1].resnets[:-1]
+            # )
+
+            del model.up_blocks[-1].resnets[-1]
+            del model.up_blocks[-1].attentions[-1]
+
+            # if config.generator.remove_last_layer:
+            #     # Zugriff auf den letzten Up-Block
+            #     last_up_block = model.up_blocks[-1]
+
+            #     if hasattr(last_up_block, "resnets") and len(last_up_block.resnets) > 0:
+            #         # Entferne das letzte ResNet, behalte aber alle anderen
+            #         new_resnets = nn.ModuleList(last_up_block.resnets[:-1])
+            #         last_up_block.resnets = new_resnets
+
+            #         # Erzwinge eine Neuinitialisierung der Parameter
+            #         for param in last_up_block.parameters():
+            #             if param.requires_grad:
+            #                 param.data = param.data.clone()
         return model
 
     elif basemodel in ["PixArt-alpha/PixArt-Sigma-XL-2-1024-MS"]:

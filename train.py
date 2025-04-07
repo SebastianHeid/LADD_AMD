@@ -62,7 +62,7 @@ def log_validation(model_state_dict, accelerator, scheduler, timestep_list, conf
     logger.info("Running validation... ")
     torch.cuda.empty_cache()
 
-    pipe = build_pipeline(config.base_model, model_state_dict, scheduler)
+    pipe = build_pipeline(config.generator.base_model, model_state_dict, scheduler)
     pipe.to(accelerator.device)
 
     if config.seed is None:
@@ -472,7 +472,7 @@ def main(config):
         diffusers.utils.logging.set_verbosity_error()
 
     noise_scheduler = DDPMScheduler.from_pretrained(
-        config.base_model, subfolder="scheduler"
+        config.discriminator.base_model, subfolder="scheduler"
     )
 
     if config.zero_snr:
@@ -513,8 +513,8 @@ def main(config):
     alpha_schedule = torch.sqrt(noise_scheduler.alphas_cumprod)
     sigma_schedule = torch.sqrt(1 - noise_scheduler.alphas_cumprod)
 
-    disc = build_disc(config.base_model, config, config.multiscale_D)
-    target_model = build_target_model(config.base_model)
+    disc = build_disc(config.discriminator.base_model, config, config.multiscale_D)
+    target_model = build_target_model(config.generator.base_model, config)
 
     disc.train()
     target_model.train()
@@ -555,7 +555,7 @@ def main(config):
 
     optimizer_D = opt_class(disc.parameters(), lr=config.discriminator.lr, **opt_kwargs)
 
-    train_dataset = ADDDataset(config.dataset_root, config.data_pkl_name)
+    train_dataset = ADDDataset(config)
     print(train_dataset.__len__())
     train_dataloader = torch.utils.data.DataLoader(
         train_dataset,
@@ -634,7 +634,7 @@ def main(config):
             D_ts_list.append(int(cur_ts_item))
     ts_D_choices = torch.tensor(D_ts_list, device=accelerator.device).long()
 
-    if config.generator.num_ts == 1 and "PixArt" in config.base_model:
+    if config.generator.num_ts == 1 and "PixArt" in config.generator.base_model:
         timestep_list = np.array(
             [400.0]
         )  # Refer Appendix A.1 of https://arxiv.org/pdf/2403.04692
@@ -650,11 +650,16 @@ def main(config):
 
     while True:  # terminate training according to iters
         for step, batch in enumerate(train_dataloader):
-            latents, noises, text_embs = batch
+            if config.generator.dataset_root:
+                latents, noises, text_embs, text_embs_gen = batch
+            else:
+                latents, noises, text_embs = batch
+                text_embs_gen = text_embs
 
             latents = latents.to(accelerator.device, non_blocking=True)
             noises = noises.to(accelerator.device, non_blocking=True)
             change_device(text_embs, accelerator.device)
+            change_device(text_embs_gen, accelerator.device)
 
             bsz = latents.shape[0]
             added_cond_kwargs = {"resolution": None, "aspect_ratio": None}
@@ -678,7 +683,7 @@ def main(config):
             timesteps = timestep_list[ts_indices].long()
 
             if (
-                config.generator.num_ts == 1 and "PixArt" in config.base_model
+                config.generator.num_ts == 1 and "PixArt" in config.generator.base_model
             ):  # Refer Appendix A.1 of https://arxiv.org/pdf/2403.04692
                 timesteps_for_init_noise = torch.tensor([999.0])[ts_indices].long()
                 noisy_model_input = noise_scheduler.add_noise(
@@ -697,11 +702,11 @@ def main(config):
                     noise_pred = target_model(
                         noisy_model_input,
                         timestep=timesteps,
-                        added_cond_kwargs=added_cond_kwargs,
-                        **text_embs,
+                        # added_cond_kwargs=added_cond_kwargs,
+                        **text_embs_gen,
                     ).sample
 
-                    if "PixArt" in config.base_model:
+                    if "PixArt" in config.generator.base_model:
                         noise_pred = noise_pred.chunk(2, dim=1)[0]
 
                     pred_x_0 = predicted_origin(
@@ -713,20 +718,13 @@ def main(config):
                         sigma_schedule,
                     )
 
-                    # add noise to generated latents and feed them to D
-                    # timesteps_D = ts_D_choices[
-                    #     torch.randint(
-                    #         0, len(ts_D_choices), (bsz,), device=accelerator.device
-                    #     )
-                    # ]
                     timesteps_D = logit_normal_discrete_sample(
                         ts_D_choices,
                         bsz,
                         ts_D_choices.device,
-                        config.noise_mean,
-                        config.noise_std,
+                        config.discriminator.noise_mean,
+                        config.discriminator.noise_std,
                     )
-                    print(timesteps_D)
 
                     noised_predicted_x0 = noise_scheduler.add_noise(
                         pred_x_0, torch.randn_like(latents), timesteps_D
@@ -736,7 +734,7 @@ def main(config):
                     pred_fake = disc(
                         noised_predicted_x0,
                         timesteps_D,
-                        added_cond_kwargs=added_cond_kwargs,
+                        # added_cond_kwargs=added_cond_kwargs,
                         **text_embs,
                     )
 
@@ -796,11 +794,11 @@ def main(config):
                         noise_pred = target_model(
                             noisy_model_input,
                             timestep=timesteps,
-                            added_cond_kwargs=added_cond_kwargs,
-                            **text_embs,
+                            #                           added_cond_kwargs=added_cond_kwargs,
+                            **text_embs_gen,
                         ).sample
 
-                        if "PixArt" in config.base_model:
+                        if "PixArt" in config.generator.base_model:
                             noise_pred = noise_pred.chunk(2, dim=1)[0]
 
                         pred_x_0 = predicted_origin(
@@ -821,8 +819,8 @@ def main(config):
                         ts_D_choices,
                         bsz,
                         ts_D_choices.device,
-                        config.noise_mean,
-                        config.noise_std,
+                        config.discriminator.noise_mean,
+                        config.discriminator.noise_std,
                     )
                     # timesteps_D_real = ts_D_choices[
                     #     torch.randint(
@@ -833,8 +831,8 @@ def main(config):
                         ts_D_choices,
                         bsz,
                         ts_D_choices.device,
-                        config.noise_mean,
-                        config.noise_std,
+                        config.discriminator.noise_mean,
+                        config.discriminator.noise_std,
                     )
                     noised_predicted_x0 = noise_scheduler.add_noise(
                         pred_x_0, torch.randn_like(latents), timesteps_D_fake
@@ -872,13 +870,13 @@ def main(config):
                     pred_fake = disc(
                         noised_predicted_x0,
                         timesteps_D_fake,
-                        added_cond_kwargs=added_cond_kwargs,
+                        #                     added_cond_kwargs=added_cond_kwargs,
                         **prompt_embeds_fake,
                     )
                     pred_true = disc(
                         noised_latents,
                         timesteps_D_real,
-                        added_cond_kwargs=added_cond_kwargs,
+                        #                       added_cond_kwargs=added_cond_kwargs,
                         **text_embs,
                     )
 
@@ -988,7 +986,7 @@ if __name__ == "__main__":
     args = parse_args()
     with open(args.config_path, "r") as file:
         config = Box(yaml.safe_load(file))
-    configure_logging(config)
+    # configure_logging(config)
     try:
         main(config)
     except Exception as e:
